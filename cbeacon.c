@@ -28,7 +28,9 @@ struct hcidump_hdr {
 
 static int  snap_len = SNAP_LEN;
 static int device_handle=-1;
-static CbeaconCallBack cbeacon_cb = NULL;
+static CbeaconCallBack  cbeacon_cb = NULL;
+static CadvertCallBack  abeacon_cb = NULL;
+static CotherCallBack   obeacon_cb = NULL;
 
 /***********************************************************************************************************/
 // Open Blue Tooth Device
@@ -168,20 +170,35 @@ static int start_lescan(int device_id)
 */
 static int parse_cbeacondata(unsigned char *buf, int len)
 {
-	CBEACON_PKT cbeacon;
-	if (len!=45) return -1;			// Check that it can be a valid buffer
-	if (buf[21] != 0x02)  return -1; 	// Check that it is beacon data
-	if (buf[22] != 0x15)  return -1;
-        memcpy(cbeacon.mac, buf + 8, 6);;
-        memcpy(cbeacon.spoof, buf+15, 6);
-        memcpy(cbeacon.uuid, buf+23, 16);
-	cbeacon.major = buf[39]*256 + buf[40];
-        cbeacon.minor = buf[41]*256 + buf[42];
-	cbeacon.power= buf[43];
-	int rssi = (int)buf[44];
-	rssi=256-rssi;
-        cbeacon.rssi= (int8_t)rssi;
-	cbeacon_cb(&cbeacon);
+	if (len==45) {
+		if (buf[21] == 0x02 && buf[22] == 0x15)  // Check if ibeacon packet
+		{
+			CBEACON_PKT cbeacon;
+        		memcpy(cbeacon.mac, buf + 8, 6);
+        		memcpy(cbeacon.spoof, buf+15, 6);
+        		memcpy(cbeacon.uuid, buf+23, 16);
+			cbeacon.major = buf[39]*256 + buf[40];
+        		cbeacon.minor = buf[41]*256 + buf[42];
+			cbeacon.power= buf[43];
+			int rssi = (int)buf[44];
+			rssi=256-rssi;
+        		cbeacon.rssi= (int8_t)rssi;
+			if ( cbeacon_cb != NULL ) cbeacon_cb(&cbeacon);
+		} else {
+			ADVERT_PKT abeacon;
+			memcpy(abeacon.mac, buf + 8, 6);
+			memcpy(abeacon.spoof, buf+15, 6);
+			memcpy(abeacon.uuid, buf+23, 16);
+			memcpy(abeacon.payload, buf+25, 5);
+			int rssi = (int)buf[44];
+                        rssi=256-rssi;
+                        abeacon.rssi= (int8_t)rssi;
+			if ( abeacon_cb != NULL ) abeacon_cb(&abeacon);
+		}
+	} else {
+		OTHER_PKT  obeacon; // TODO
+		if ( obeacon_cb != NULL ) obeacon_cb(&obeacon);
+	}
 	return 0;
 }
 
@@ -243,7 +260,7 @@ static int process_frames(int dev, int sock, int fd)
 /*
  * Initialization
  */
-int cbeacon_init(CbeaconCallBack cb)
+int cbeacon_init(CbeaconCallBack bcb, CadvertCallBack acb, CotherCallBack ocb)
 {
 	if (signal(SIGINT, sigint_handler) == SIG_ERR) {
         	fprintf(stderr, "Can't catch SIGINT\n");
@@ -251,7 +268,9 @@ int cbeacon_init(CbeaconCallBack cb)
   	}
   	int device_id = hci_get_route(NULL); // Get device
   	device_handle = start_lescan(device_id);
-	cbeacon_cb = cb; // Callback for returning data
+	cbeacon_cb = bcb; // Callback for beacon data
+	abeacon_cb = acb; // Callback for adverts
+	obeacon_cb = ocb; // Callback for other data
 	return  device_handle;
 }
 

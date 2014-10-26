@@ -15,10 +15,29 @@ typedef struct cbeacon_pkt {
 } __attribute__ ((packed))
 CBEACON_PKT;
 
-// Call back
-typedef void (*CbeaconCallBack)(CBEACON_PKT *packet);
+typedef struct advert_pkt {
+        uint8_t mac[6];
+        uint8_t spoof[6];
+        uint8_t uuid[16];
+	uint8_t payload[5];
+	int8_t rssi;
+} __attribute__ ((packed))
+ADVERT_PKT;
 
-int cbeacon_init(CbeaconCallBack cb);
+typedef struct other_pkt {
+        uint8_t mac[6];
+} __attribute__ ((packed))
+OTHER_PKT;
+
+
+// Callback for beacon message
+typedef void (*CbeaconCallBack)(CBEACON_PKT *packet);
+// Callback for advert message
+typedef void (*CadvertCallBack)(ADVERT_PKT *packet);
+// Callback for other packets
+typedef void (*CotherCallBack)(OTHER_PKT *packet);
+
+int cbeacon_init(CbeaconCallBack bcb, CadvertCallBack acb, CotherCallBack ocb);
 int cbeacon_start();
 void cbeacon_stop();
 
