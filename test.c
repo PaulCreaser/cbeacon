@@ -10,11 +10,9 @@ void callback2(ADVERT_PKT *data) {
 }
 
 void callback3(OTHER_PKT *data) {
-        //if ( 0xda != data->mac[0] ) return;
-	//if ( 0xa0 == data->mac[0] ) return;
-        printf("<Other MAC:");
+        printf("<");
 	int i=0;
-	for (i=0; i<data->len; i++) printf("%c ", data->data[i]);
+	for (i=0; i<data->len; i++) printf("%x ", data->data[i]);
 	printf(">\n");
 }
 
@@ -30,11 +28,21 @@ void callback4(S_PKT *data) {
 
 void callback5(SA_PKT *data) {
         int i=0;
-        printf("<");
+        printf("5<");
 	for (i=5; i>=0; i--) printf("%x ", data->mac[i]);
         printf(" UUID: ");
         for (i=0; i<UUID_LEN; i++) printf("%x ", data->uuid[i]);
 	printf("RSSI %d", data->rssi);
+        printf(">\n");
+}
+
+void callback6(D_PKT *data) {
+        int i=0;
+        printf("<");
+        for (i=5; i>=0; i--) printf("%x ", data->mac[i]);
+        printf(" Data: ");
+        for (i=0; i<16; i++) printf("%x ", data->data[i]);
+        printf("RSSI %d", data->rssi);
         printf(">\n");
 }
 
@@ -46,9 +54,10 @@ int main(int argc, char **argv)
   }
   cbeacon_setcb_i(BEACON_TYPE_I, &callback1);
   cbeacon_setcb_g(BEACON_TYPE_G, &callback2);
-  cbeacon_setcb_o(BEACON_TYPE_D, &callback3);
+  cbeacon_setcb_o(BEACON_TYPE_O, &callback3);
   cbeacon_setcb_s(BEACON_TYPE_S, &callback4);
   cbeacon_setcb_sa(BEACON_TYPE_SA, &callback5);
+  cbeacon_setcb_d(BEACON_TYPE_D, &callback6);
   if (cbeacon_start() == -1 ) {
         return -1;
   }

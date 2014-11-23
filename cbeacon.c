@@ -33,6 +33,7 @@ static CadvertCallBack  abeacon_cb  = NULL; // Generic beacon advert
 static CotherCallBack   obeacon_cb  = NULL; //
 static CsCallBack	sbeacon_cb  = NULL; // Special Advert
 static CsaCallBack 	sabeacon_cb = NULL; // Service Advert
+static DCallBack       dbeacon_cb  = NULL; // Data
 static BEACON_TYPE	g_type = BEACON_TYPE_NONE;
 
 /***********************************************************************************************************/
@@ -219,9 +220,22 @@ static int parse_cbeacondata(unsigned char *buf, int len)
                 rssi=256-rssi;
                 sabeacon.rssi= (int8_t)rssi;
 		if (sabeacon_cb != NULL ) sabeacon_cb(&sabeacon);
-	} else if (g_type & BEACON_TYPE_D) {
+	} else if ( len==28 && (g_type & BEACON_TYPE_D)) {
+                D_PKT dbeacon;
+		memcpy(dbeacon.mac, buf + 7, 6);
+                memcpy(dbeacon.data, buf+12, 16);
+                dbeacon.len = len;
+                int rssi = (int)buf[len-1];
+                rssi=256-rssi;
+                dbeacon.rssi= (int8_t)rssi;
+                if ( dbeacon_cb != NULL ) dbeacon_cb(&dbeacon);
+	} else if (g_type & BEACON_TYPE_O) {
 		OTHER_PKT obeacon;
 		memcpy(obeacon.data, buf, len);
+		obeacon.len = len;
+		int rssi = (int)buf[len-1];
+		rssi=256-rssi;
+                obeacon.rssi= (int8_t)rssi;
 		if ( obeacon_cb != NULL ) obeacon_cb(&obeacon);
 	}
 	return 0;
@@ -334,6 +348,12 @@ int cbeacon_setcb_sa(BEACON_TYPE type, CsaCallBack  sacb)
         return 0;
 }
 
+int cbeacon_setcb_d(BEACON_TYPE type, DCallBack  dcb)
+{
+        g_type = g_type | type;
+        dbeacon_cb = dcb;
+        return 0;
+}
 
 /*
  * Start beacon

@@ -13,6 +13,7 @@ typedef enum {
     BEACON_TYPE_S=0x4,  	// Special Advert
     BEACON_TYPE_SA=0x8,		// Service Advert
     BEACON_TYPE_D=0xF,		// Data
+    BEACON_TYPE_O=0x1F,
     BEACON_TYPE_ALL=0xFF
 } BEACON_TYPE;
 
@@ -50,6 +51,14 @@ typedef struct sa_pkt {
 	int8_t  rssi;
 } SA_PKT;
 
+typedef struct d_pkt {
+        uint8_t mac[6];
+        uint8_t data[16]; // UUID
+        int     len; // Without mac, spoof, uuid
+        int8_t  rssi;
+} D_PKT;
+
+
 typedef struct other_pkt {
         uint8_t mac[6];
 	uint8_t data[1024]; // Length not known
@@ -66,6 +75,8 @@ typedef void (*CadvertCallBack)(ADVERT_PKT *packet);
 typedef void (*CsCallBack)(S_PKT *packet);
 // Callback for service advert
 typedef void (*CsaCallBack)(SA_PKT *packet);
+// Data Message
+typedef void (*DCallBack)(D_PKT *packet);
 // Callback for other packets
 typedef void (*CotherCallBack)(OTHER_PKT *packet);
 
@@ -74,6 +85,7 @@ int cbeacon_setcb_i(BEACON_TYPE type, CbeaconCallBack bcb);
 int cbeacon_setcb_g(BEACON_TYPE type, CadvertCallBack acb);
 int cbeacon_setcb_s(BEACON_TYPE type, CsCallBack scb);
 int cbeacon_setcb_sa(BEACON_TYPE type, CsaCallBack sacb);
+int cbeacon_setcb_d(BEACON_TYPE type, DCallBack  dcb);
 int cbeacon_setcb_o(BEACON_TYPE type, CotherCallBack  ocb); 
 int cbeacon_start();
 void cbeacon_stop();
