@@ -28,9 +28,12 @@ struct hcidump_hdr {
 
 static int  snap_len = SNAP_LEN;
 static int device_handle=-1;
-static CbeaconCallBack  cbeacon_cb = NULL;
-static CadvertCallBack  abeacon_cb = NULL;
-static CotherCallBack   obeacon_cb = NULL;
+static CbeaconCallBack  cbeacon_cb  = NULL; // Ibeacon Advert
+static CadvertCallBack  abeacon_cb  = NULL; // Generic beacon advert
+static CotherCallBack   obeacon_cb  = NULL; //
+static CsCallBack	sbeacon_cb  = NULL; // Special Advert
+static CsaCallBack 	sabeacon_cb = NULL; // Service Advert
+static BEACON_TYPE	g_type = BEACON_TYPE_NONE;
 
 /***********************************************************************************************************/
 // Open Blue Tooth Device
@@ -171,7 +174,8 @@ static int start_lescan(int device_id)
 static int parse_cbeacondata(unsigned char *buf, int len)
 {
 	if (len==45) {
-		if (buf[21] == 0x02 && buf[22] == 0x15)  // Check if ibeacon packet
+		// Ibeacon
+		if ( ( buf[21] == 0x02 && buf[22] == 0x15) && (g_type & BEACON_TYPE_I) )  // Check if ibeacon packet
 		{
 			CBEACON_PKT cbeacon;
         		memcpy(cbeacon.mac, buf + 8, 6);
@@ -184,19 +188,40 @@ static int parse_cbeacondata(unsigned char *buf, int len)
 			rssi=256-rssi;
         		cbeacon.rssi= (int8_t)rssi;
 			if ( cbeacon_cb != NULL ) cbeacon_cb(&cbeacon);
-		} else {
+		} else if (g_type & BEACON_TYPE_G)  { // Generic Advert
 			ADVERT_PKT abeacon;
 			memcpy(abeacon.mac, buf + 8, 6);
 			memcpy(abeacon.spoof, buf+15, 6);
 			memcpy(abeacon.uuid, buf+23, 16);
-			memcpy(abeacon.payload, buf+25, 5);
+			memcpy(abeacon.payload, buf+39, 5);
 			int rssi = (int)buf[44];
                         rssi=256-rssi;
                         abeacon.rssi= (int8_t)rssi;
 			if ( abeacon_cb != NULL ) abeacon_cb(&abeacon);
 		}
-	} else {
-		OTHER_PKT  obeacon; // TODO
+	} else if ( (len == 25) && (g_type & BEACON_TYPE_S)  ) {
+		// Basic Advert message which also includes ASCII device name
+		S_PKT  sbeacon;
+		memcpy(sbeacon.mac, buf + 7, 6);
+		memcpy(sbeacon.dev_name, buf+16, 5);
+		memcpy(sbeacon.data, buf, len);
+		sbeacon.len = len;
+		int rssi = (int)buf[len-1];
+		rssi=256-rssi;
+                sbeacon.rssi= (int8_t)rssi;
+		if ( sbeacon_cb != NULL ) sbeacon_cb(&sbeacon);
+	} else if ( len==33 && (g_type & BEACON_TYPE_SA) ) {
+		SA_PKT sabeacon;
+		memcpy(sabeacon.mac, buf + 7, 6);
+		sabeacon.len = len;
+		memcpy(sabeacon.uuid, buf+16, UUID_LEN);
+		int rssi = (int)buf[len-1];
+                rssi=256-rssi;
+                sabeacon.rssi= (int8_t)rssi;
+		if (sabeacon_cb != NULL ) sabeacon_cb(&sabeacon);
+	} else if (g_type & BEACON_TYPE_D) {
+		OTHER_PKT obeacon;
+		memcpy(obeacon.data, buf, len);
 		if ( obeacon_cb != NULL ) obeacon_cb(&obeacon);
 	}
 	return 0;
@@ -260,7 +285,7 @@ static int process_frames(int dev, int sock, int fd)
 /*
  * Initialization
  */
-int cbeacon_init(CbeaconCallBack bcb, CadvertCallBack acb, CotherCallBack ocb)
+int cbeacon_init()
 {
 	if (signal(SIGINT, sigint_handler) == SIG_ERR) {
         	fprintf(stderr, "Can't catch SIGINT\n");
@@ -268,11 +293,47 @@ int cbeacon_init(CbeaconCallBack bcb, CadvertCallBack acb, CotherCallBack ocb)
   	}
   	int device_id = hci_get_route(NULL); // Get device
   	device_handle = start_lescan(device_id);
-	cbeacon_cb = bcb; // Callback for beacon data
-	abeacon_cb = acb; // Callback for adverts
-	obeacon_cb = ocb; // Callback for other data
 	return  device_handle;
 }
+
+/*
+ * Add Callbacks
+ */
+int cbeacon_setcb_i(BEACON_TYPE type, CbeaconCallBack bcb)
+{
+	g_type = g_type | type;
+	cbeacon_cb = bcb;
+	return 0;
+}
+
+int cbeacon_setcb_g(BEACON_TYPE type, CadvertCallBack acb)
+{
+	g_type = g_type | type;
+	abeacon_cb = acb;
+	return 0;
+}
+
+int cbeacon_setcb_o(BEACON_TYPE type, CotherCallBack  ocb)
+{
+	g_type = g_type | type;
+	obeacon_cb = ocb;
+	return 0;
+}
+
+int cbeacon_setcb_s(BEACON_TYPE type, CsCallBack  scb)
+{
+        g_type = g_type | type;
+        sbeacon_cb = scb;
+        return 0;
+}
+
+int cbeacon_setcb_sa(BEACON_TYPE type, CsaCallBack  sacb)
+{
+        g_type = g_type | type;
+        sabeacon_cb = sacb;
+        return 0;
+}
+
 
 /*
  * Start beacon
