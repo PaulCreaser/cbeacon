@@ -1,64 +1,64 @@
 #include <stdio.h>
+#include <time.h>
+#include <sys/time.h>
 #include "cbeacon.h"
 
-void callback1(CBEACON_PKT *data) {
-        printf("<Cbeacon : Major %u Minor %u Rssi %u Power %u>\n", data->major, data->minor, data->rssi, data->power);
+/*********************************************************************************************************************************/
+
+static long long int start_time=0;
+static int other_count = 0;
+
+/**
+* @brief 
+*/
+inline static void set_start_time()
+{
+  struct timeval start;
+  gettimeofday(&start, NULL);
+  start_time = (start.tv_sec)*1000000 + start.tv_usec;
 }
 
-void callback2(ADVERT_PKT *data) {
-        printf("<Advert>\n");
+/**
+* @brief 
+*
+* @return 
+*/
+inline static long long int get_average_time()
+{
+	other_count++;
+	long long int current_time;
+	struct timeval current;
+  	gettimeofday(&current, NULL);
+    current_time = (current.tv_sec)*1000000 + current.tv_usec;
+	return (current_time-start_time)/other_count; 
 }
 
-void callback3(OTHER_PKT *data) {
-        printf("<");
-	int i=0;
-	for (i=0; i<data->len; i++) printf("%x ", data->data[i]);
-	printf(">\n");
+/**
+* @brief :w
+*
+*
+* @param data
+* @param len
+*/
+static void callback3(int8_t *data, int len) {
 }
 
-void callback4(S_PKT *data) {
-	int i=0;
-	printf("<");
-	for (i=5; i>=0; i--) printf("%x ", data->mac[i]);
-	printf(" Name: ");
-	for (i=0; i<5; i++) printf("%c ", data->dev_name[i]);
-	printf("RSSI %d", data->rssi);
-	printf(">\n");
-}
-
-void callback5(SA_PKT *data) {
-        int i=0;
-        printf("5<");
-	for (i=5; i>=0; i--) printf("%x ", data->mac[i]);
-        printf(" UUID: ");
-        for (i=0; i<UUID_LEN; i++) printf("%x ", data->uuid[i]);
-	printf("RSSI %d", data->rssi);
-        printf(">\n");
-}
-
-void callback6(D_PKT *data) {
-        int i=0;
-        printf("<");
-        for (i=5; i>=0; i--) printf("%x ", data->mac[i]);
-        printf(" Data: ");
-        for (i=0; i<16; i++) printf("%x ", data->data[i]);
-        printf("RSSI %d", data->rssi);
-        printf(">\n");
-}
-
+/**
+* @brief 
+*
+* @param argc
+* @param argv
+*
+* @return 
+*/
 int main(int argc, char **argv)
 {
-
-  if (cbeacon_init(&callback1, &callback2, &callback3) == -1 ) {
+  set_start_time();
+  if (cbeacon_init() == -1 ) {
         return -1;
   }
-  cbeacon_setcb_i(BEACON_TYPE_I, &callback1);
-  cbeacon_setcb_g(BEACON_TYPE_G, &callback2);
-  cbeacon_setcb_o(BEACON_TYPE_O, &callback3);
-  cbeacon_setcb_s(BEACON_TYPE_S, &callback4);
-  cbeacon_setcb_sa(BEACON_TYPE_SA, &callback5);
-  cbeacon_setcb_d(BEACON_TYPE_D, &callback6);
-  if (cbeacon_start() == -1 ) {
+  cbeacon_setcb(&callback3);
+  if (cbeacon_start(false) == -1 ) {
         return -1;
   }
   cbeacon_stop();

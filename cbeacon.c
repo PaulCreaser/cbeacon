@@ -1,9 +1,6 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/ioctl.h>
-#include <signal.h>
-#include <sys/poll.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <stdio.h>
 
@@ -13,6 +10,7 @@
 #include <bluetooth/sdp.h>
 
 #include "cbeacon.h"
+
 
 #define SNAP_LEN        HCI_MAX_FRAME_SIZE
 
@@ -26,27 +24,29 @@ struct hcidump_hdr {
 
 #define HCIDUMP_HDR_SIZE (sizeof(struct hcidump_hdr))
 
-static int  snap_len = SNAP_LEN;
-static int device_handle=-1;
-static CbeaconCallBack  cbeacon_cb  = NULL; // Ibeacon Advert
-static CadvertCallBack  abeacon_cb  = NULL; // Generic beacon advert
-static CotherCallBack   obeacon_cb  = NULL; //
-static CsCallBack	sbeacon_cb  = NULL; // Special Advert
-static CsaCallBack 	sabeacon_cb = NULL; // Service Advert
-static DCallBack       dbeacon_cb  = NULL; // Data
-static BEACON_TYPE	g_type = BEACON_TYPE_NONE;
+/*****************************************************************************************************************************
+ * Global variables
+ *******************************************************************************************************************************/
+static int 				device_handle=-1;
+static cbeaconCallBack  cbeacon_cb  = NULL; //
+static bdaddr_t 		g_mac_address;
+static int				g_sd=-1;
 
-/***********************************************************************************************************/
-// Open Blue Tooth Device
+/*****************************************************************************************************************************
+ * Prototypes
+ *******************************************************************************************************************************/
 static int open_socket(int dev);
 static int start_lescan(int device_id);
 static int stop_lescan(int device_handle);
-static int parse_cbeacondata(unsigned char *buf, int len);
-static int process_frames(int dev, int sock, int fd);
-static void sigint_handler(int sig);
+static int process_frames(int dev, bool nb);
 /***********************************************************************************************************/
 
-/** Open hci
+/**
+* @brief   Open Socket 
+*
+* @param dev Device handle
+*
+* @return 
 */
 static int open_socket(int dev)
 {
@@ -66,6 +66,11 @@ static int open_socket(int dev)
                         perror("Can't get device info");
                         return -1;
                 }
+
+				if (hci_read_bd_addr(dd, &g_mac_address, 1000) < 0 ) {
+						perror("Can't get device mac address");
+                        return -1;
+				}
 
                 opt = hci_test_bit(HCI_RAW, &di.flags);
                 if (ioctl(dd, HCISETRAW, opt) < 0) {
@@ -118,18 +123,13 @@ static int open_socket(int dev)
         return sk;
 }
 
-/*
- * Ensure clean shutdown on kill
- */
-static void sigint_handler(int sig)
-{
-       	if (device_handle!=-1) stop_lescan(device_handle);
-	exit(0);
-}
-
-/* 
- * Stop le scan
- */
+/**
+* @brief  Stop low energy scan 
+*
+* @param device_handle
+*
+* @return 
+*/
 static int stop_lescan(int device_handle)
 {
   uint8_t filter_dup = 0;
@@ -142,7 +142,13 @@ static int stop_lescan(int device_handle)
   return 0;
 }
 
-// Start LE scan
+/**
+* @brief Start low energy scan
+*
+* @param device_id
+*
+* @return 
+*/
 static int start_lescan(int device_id)
 {
   int device_handle = 0;
@@ -170,205 +176,105 @@ static int start_lescan(int device_id)
 }
 
 /**
-* Extract data from buffer
+* @brief  Process frames
+*
+* @param dev   Device handle
+* @param sock  Socket number
+* @param nb    Non blocking flag
+*
+* @return 
 */
-static int parse_cbeacondata(unsigned char *buf, int len)
+static int process_frames(int dev, bool nb)
 {
-	if (len==45) {
-		// Ibeacon
-		if ( ( buf[21] == 0x02 && buf[22] == 0x15) && (g_type & BEACON_TYPE_I) )  // Check if ibeacon packet
-		{
-			CBEACON_PKT cbeacon;
-        		memcpy(cbeacon.mac, buf + 8, 6);
-        		memcpy(cbeacon.spoof, buf+15, 6);
-        		memcpy(cbeacon.uuid, buf+23, 16);
-			cbeacon.major = buf[39]*256 + buf[40];
-        		cbeacon.minor = buf[41]*256 + buf[42];
-			cbeacon.power= buf[43];
-			int rssi = (int)buf[44];
-			rssi=256-rssi;
-        		cbeacon.rssi= (int8_t)rssi;
-			if ( cbeacon_cb != NULL ) cbeacon_cb(&cbeacon);
-		} else if (g_type & BEACON_TYPE_G)  { // Generic Advert
-			ADVERT_PKT abeacon;
-			memcpy(abeacon.mac, buf + 8, 6);
-			memcpy(abeacon.spoof, buf+15, 6);
-			memcpy(abeacon.uuid, buf+23, 16);
-			memcpy(abeacon.payload, buf+39, 5);
-			int rssi = (int)buf[44];
-                        rssi=256-rssi;
-                        abeacon.rssi= (int8_t)rssi;
-			if ( abeacon_cb != NULL ) abeacon_cb(&abeacon);
-		}
-	} else if ( (len == 25) && (g_type & BEACON_TYPE_S)  ) {
-		// Basic Advert message which also includes ASCII device name
-		S_PKT  sbeacon;
-		memcpy(sbeacon.mac, buf + 7, 6);
-		memcpy(sbeacon.dev_name, buf+16, 5);
-		memcpy(sbeacon.data, buf, len);
-		sbeacon.len = len;
-		int rssi = (int)buf[len-1];
-		rssi=256-rssi;
-                sbeacon.rssi= (int8_t)rssi;
-		if ( sbeacon_cb != NULL ) sbeacon_cb(&sbeacon);
-	} else if ( len==33 && (g_type & BEACON_TYPE_SA) ) {
-		SA_PKT sabeacon;
-		memcpy(sabeacon.mac, buf + 7, 6);
-		sabeacon.len = len;
-		memcpy(sabeacon.uuid, buf+16, UUID_LEN);
-		int rssi = (int)buf[len-1];
-                rssi=256-rssi;
-                sabeacon.rssi= (int8_t)rssi;
-		if (sabeacon_cb != NULL ) sabeacon_cb(&sabeacon);
-	} else if ( len==28 && (g_type & BEACON_TYPE_D)) {
-                D_PKT dbeacon;
-		memcpy(dbeacon.mac, buf + 7, 6);
-                memcpy(dbeacon.data, buf+12, 16);
-                dbeacon.len = len;
-                int rssi = (int)buf[len-1];
-                rssi=256-rssi;
-                dbeacon.rssi= (int8_t)rssi;
-                if ( dbeacon_cb != NULL ) dbeacon_cb(&dbeacon);
-	} else if (g_type & BEACON_TYPE_O) {
-		OTHER_PKT obeacon;
-		memcpy(obeacon.data, buf, len);
-		obeacon.len = len;
-		int rssi = (int)buf[len-1];
-		rssi=256-rssi;
-                obeacon.rssi= (int8_t)rssi;
-		if ( obeacon_cb != NULL ) obeacon_cb(&obeacon);
-	}
-	return 0;
-}
-
-/**
-* Process data from ble
-*/
-static int process_frames(int dev, int sock, int fd)
-{
-	char ctrl[100];
-        if (sock < 0) return -1;
-        if (snap_len < SNAP_LEN) snap_len = SNAP_LEN;
-        char *buf = malloc(snap_len + HCIDUMP_HDR_SIZE);
-        if (!buf) {
-                perror("Can't allocate data buffer");
-                return -1;
-        }
-        void *data = buf + HCIDUMP_HDR_SIZE;
-
-        if (dev != HCI_DEV_NONE) printf("device: hci%d ", dev);
-
-        while (device_handle!=-1) {
-		struct pollfd fds[1];
-		fds[0].fd = sock;
-        	fds[0].events = POLLIN;
-        	fds[0].revents = 0;
-		poll(fds, 1, -1);
-                if (fds[0].revents & (POLLHUP | POLLERR | POLLNVAL)) {
-                  if (fds[0].fd == sock) {
-                    fprintf(stderr, "Device: disconnected\n");
-                    break;
-                  }
-                  else {
-                    fprintf(stderr, "Client: disconnect\n");
-                    break;
-                  }
-                }
+    if (g_sd < 0) return -1;
+    char buf[SNAP_LEN + HCIDUMP_HDR_SIZE];//  = malloc(snap_len + HCIDUMP_HDR_SIZE);
+    while (device_handle!=-1) // Loop in blocking mode
+	{
+		void *data = buf + HCIDUMP_HDR_SIZE;
+		fd_set set;
+		FD_ZERO(&set);
+		FD_SET(g_sd, &set);
+		struct timeval timeout;
+		timeout.tv_sec = 0;
+		timeout.tv_usec=100000;
+		int rv = select (g_sd+1, &set, NULL, NULL, &timeout);
 		struct iovec  iv;
-                iv.iov_base = data;
-                iv.iov_len  = snap_len;
+        iv.iov_base = data;
+        iv.iov_len  = SNAP_LEN;
 		struct msghdr msg;
+		char ctrl[128];
 		memset(&msg, 0, sizeof(msg));
                 msg.msg_iov = &iv;
                 msg.msg_iovlen = 1;
                 msg.msg_control = ctrl;
  		msg.msg_controllen = 100;
-
-                int len = recvmsg(sock, &msg, MSG_DONTWAIT);
-                if (len < 0) {
-                        if (errno == EAGAIN || errno == EINTR)
-                                continue;
-                        perror("Receive failed");
-                        return -1;
-                }
-                parse_cbeacondata(data, len);
-       }
-       return 0;
+		if (rv > 0) 
+		{ 
+        	int len = recvmsg(g_sd, &msg, MSG_DONTWAIT);
+            if (len <= 0) 
+			{
+            	if (errno == EAGAIN || errno == EINTR)
+                	continue;
+                perror("Receive failed");
+                return -1;
+            } else {
+				if ( cbeacon_cb != NULL ) cbeacon_cb( (int8_t*)data, len);
+			}
+		}
+		if (nb) break;
+    }
+    return 0;
 }
 
-/*
- * Initialization
- */
+/**
+* @brief 
+*
+* @return 
+*/
 int cbeacon_init()
 {
-	if (signal(SIGINT, sigint_handler) == SIG_ERR) {
-        	fprintf(stderr, "Can't catch SIGINT\n");
-        	return -1;
-  	}
   	int device_id = hci_get_route(NULL); // Get device
   	device_handle = start_lescan(device_id);
+	g_sd = open_socket(0);
 	return  device_handle;
 }
 
-/*
- * Add Callbacks
- */
-int cbeacon_setcb_i(BEACON_TYPE type, CbeaconCallBack bcb)
+/**
+* @brief 
+*
+* @param cb
+*
+* @return 
+*/
+int cbeacon_setcb(cbeaconCallBack  cb)
 {
-	g_type = g_type | type;
-	cbeacon_cb = bcb;
+	cbeacon_cb = cb;
 	return 0;
 }
 
-int cbeacon_setcb_g(BEACON_TYPE type, CadvertCallBack acb)
+/**
+* @brief  Start beacon scan
+*
+* @return 
+*/
+int cbeacon_start(bool nb)
 {
-	g_type = g_type | type;
-	abeacon_cb = acb;
-	return 0;
+    return process_frames(0, nb);
 }
 
-int cbeacon_setcb_o(BEACON_TYPE type, CotherCallBack  ocb)
+/**
+* @brief   Get mac address of BLE device
+*
+* @param mac_address[6]
+*/
+void cbeacon_get_mac_address(int8_t mac_address[6])
 {
-	g_type = g_type | type;
-	obeacon_cb = ocb;
-	return 0;
+	memcpy(mac_address, (int8_t *)&g_mac_address, 6);
 }
 
-int cbeacon_setcb_s(BEACON_TYPE type, CsCallBack  scb)
-{
-        g_type = g_type | type;
-        sbeacon_cb = scb;
-        return 0;
-}
-
-int cbeacon_setcb_sa(BEACON_TYPE type, CsaCallBack  sacb)
-{
-        g_type = g_type | type;
-        sabeacon_cb = sacb;
-        return 0;
-}
-
-int cbeacon_setcb_d(BEACON_TYPE type, DCallBack  dcb)
-{
-        g_type = g_type | type;
-        dbeacon_cb = dcb;
-        return 0;
-}
-
-/*
- * Start beacon
- */
-int cbeacon_start()
-{
-	int device = 0;
-	if (device_handle!=-1) {
-        	return process_frames(device, open_socket(device), -1);
-  	} else return -1;
-}
-
-/*
- * Stop Beacon
- */
+/**
+* @brief Stop beacon scan
+*/
 void cbeacon_stop()
 {
 	if (device_handle != -1) stop_lescan(device_handle);
